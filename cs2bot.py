@@ -533,7 +533,9 @@ def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
     search_conv = ConversationHandler(
-        entry_points=[CommandHandler("find", find_cmd)],
+    entry_points=[CommandHandler("find", find_cmd)],
+    conversation_timeout=60,
+
         states={
             STEP_TOURNAMENT: [CallbackQueryHandler(tournament_chosen), MessageHandler(filters.TEXT & ~filters.COMMAND, tournament_text)],
             STEP_WEAPON: [CallbackQueryHandler(weapon_chosen)],
