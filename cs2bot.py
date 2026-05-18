@@ -90,7 +90,8 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     kb = make_keyboard(POPULAR_TOURNAMENTS, columns=2)
-    kb.inline_keyboard.append([InlineKeyboardButton("✏️ Ввести вручную", callback_data="__manual__")])
+    kb.inline_keyboard.append([InlineKeyboardButton("Ввести вручную", callback_data="__manual__")])
+
     await update.message.reply_text(
         "🏆 *Шаг 1/7 — Турнир или наклейка*\n\nВыбери или введи вручную:",
         parse_mode="Markdown",
