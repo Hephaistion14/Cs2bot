@@ -10,97 +10,26 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
 
-# ============================================================
-# ВСТАВЬ СВОЙ ТОКЕН СЮДА
 TOKEN = "8831794929:AAEgNJahaqbw24Yz6br8ModHcM75SREvXac"
 ALERTS_FILE = "alerts.json"
-# ============================================================
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Шаги поиска
-STEP_TOURNAMENT = 0
-STEP_WEAPON = 1
-STEP_QUALITY = 2
-STEP_WEAR = 3
-STEP_CHARM = 4
-STEP_PRICE = 5
-STEP_YEAR = 6
+STEP_TOURNAMENT, STEP_WEAPON, STEP_QUALITY, STEP_WEAR, STEP_CHARM, STEP_PRICE, STEP_YEAR = range(7)
+ALERT_QUERY, ALERT_PRICE, ALERT_INTERVAL = range(10, 13)
 
-# Шаги алерта
-ALERT_QUERY = 10
-ALERT_PRICE = 11
-ALERT_INTERVAL = 12
-
-WEAPONS = [
-    "Любое", "AK-47", "M4A4", "M4A1-S", "AWP", "Desert Eagle",
-    "USP-S", "Glock-18", "MP9", "MAC-10", "P250", "Five-SeveN",
-    "Butterfly Knife", "Karambit", "Bayonet", "Flip Knife"
-]
+WEAPONS = ["Любое", "AK-47", "M4A4", "M4A1-S", "AWP", "Desert Eagle", "USP-S", "Glock-18", "MP9", "MAC-10", "P250", "Five-SeveN", "Butterfly Knife", "Karambit", "Bayonet", "Flip Knife"]
 QUALITIES = ["Любое", "Covert", "Classified", "Restricted", "Mil-Spec", "Industrial Grade"]
 WEAR_OPTIONS = ["Любой", "Factory New (FN)", "Minimal Wear (MW)", "Field-Tested (FT)", "Well-Worn (WW)", "Battle-Scarred (BS)"]
-WEAR_MAP = {
-    "Factory New (FN)": "Factory New",
-    "Minimal Wear (MW)": "Minimal Wear",
-    "Field-Tested (FT)": "Field-Tested",
-    "Well-Worn (WW)": "Well-Worn",
-    "Battle-Scarred (BS)": "Battle-Scarred",
-}
+WEAR_MAP = {"Factory New (FN)": "Factory New", "Minimal Wear (MW)": "Minimal Wear", "Field-Tested (FT)": "Field-Tested", "Well-Worn (WW)": "Well-Worn", "Battle-Scarred (BS)": "Battle-Scarred"}
 PRICE_RANGES = ["Любой", "0-10$", "10-50$", "50-200$", "200-500$", "500$+"]
-PRICE_MAP = {
-    "0-10$": (0, 10),
-    "10-50$": (10, 50),
-    "50-200$": (50, 200),
-    "200-500$": (200, 500),
-    "500$+": (500, 999999),
-}
+PRICE_MAP = {"0-10$": (0, 10), "10-50$": (10, 50), "50-200$": (50, 200), "200-500$": (200, 500), "500$+": (500, 999999)}
 STICKER_YEARS = ["Любой", "до 2016", "до 2017", "до 2018", "до 2019", "до 2020", "до 2021", "до 2022", "до 2023", "до 2024"]
-
-# Турниры по годам (для фильтрации по названию)
-TOURNAMENT_YEARS = {
-    2014: ["Katowice 2014", "Cologne 2014", "EMS One"],
-    2015: ["Katowice 2015", "Cluj-Napoca 2015", "ESL One Cologne 2015"],
-    2016: ["Cluj-Napoca 2015", "MLG Columbus 2016", "ESL One Cologne 2016", "ELEAGUE Season"],
-    2017: ["Atlanta 2017", "Krakow 2017", "ELEAGUE 2017", "Boston 2018"],
-    2018: ["Boston 2018", "London 2018", "FACEIT 2018"],
-    2019: ["Katowice 2019", "Berlin 2019", "StarLadder 2019"],
-    2020: ["2020"],
-    2021: ["Stockholm 2021", "Antwerp 2021"],
-    2022: ["Antwerp 2022", "Rio 2022", "IEM Rio 2022", "PGL Antwerp"],
-    2023: ["Paris 2023", "BLAST Paris", "Copenhagen 2023"],
-    2024: ["Katowice 2024", "Copenhagen 2024", "Shanghai 2024"],
-    2025: ["2025"],
-}
-
-def get_max_year_from_filter(year_filter: str) -> int:
-    if year_filter == "Любой":
-        return 9999
-    return int(year_filter.replace("до ", ""))
-
-def item_matches_year(name: str, max_year: int) -> bool:
-    """Проверяет, что название скина/наклейки соответствует году <= max_year"""
-    if max_year == 9999:
-        return True
-    name_lower = name.lower()
-    # Ищем год в названии напрямую
-    for year in range(2013, 2026):
-        if str(year) in name_lower and year > max_year:
-            return False
-    return True
-
-POPULAR_TOURNAMENTS = [
-    "PGL Antwerp 2022", "IEM Rio 2022", "BLAST Paris 2023",
-    "IEM Katowice 2024", "PGL Copenhagen 2024", "Stockholm 2021",
-    "Berlin 2019", "Katowice 2019"
-]
+POPULAR_TOURNAMENTS = ["PGL Antwerp 2022", "IEM Rio 2022", "BLAST Paris 2023", "IEM Katowice 2024", "PGL Copenhagen 2024", "Stockholm 2021", "Berlin 2019", "Katowice 2019"]
 CHECK_INTERVALS = ["5 минут", "15 минут", "30 минут", "1 час", "3 часа"]
-INTERVAL_SECONDS = {
-    "5 минут": 300, "15 минут": 900, "30 минут": 1800,
-    "1 час": 3600, "3 часа": 10800,
-}
+INTERVAL_SECONDS = {"5 минут": 300, "15 минут": 900, "30 минут": 1800, "1 час": 3600, "3 часа": 10800}
 
-# Хранилище алертов
 def load_alerts():
     if os.path.exists(ALERTS_FILE):
         with open(ALERTS_FILE, "r") as f:
@@ -113,20 +42,22 @@ def save_alerts(data):
 
 alerts_store = load_alerts()
 
-def get_user_data(context):
-    if "search" not in context.user_data:
-        context.user_data["search"] = {}
-    return context.user_data["search"]
-
 def make_keyboard(options, columns=2):
     buttons = [InlineKeyboardButton(opt, callback_data=opt) for opt in options]
     keyboard = [buttons[i:i+columns] for i in range(0, len(buttons), columns)]
     return InlineKeyboardMarkup(keyboard)
 
+def item_matches_year(name, max_year):
+    if max_year == 9999:
+        return True
+    for year in range(2013, 2026):
+        if str(year) in name.lower() and year > max_year:
+            return False
+    return True
+
 # ── Команды ──────────────────────────────────────────────────
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
     await update.message.reply_text(
         "👋 *CS2 Skin Finder*\n\n"
         "Ищу скины с турнирными наклейками:\n"
@@ -145,12 +76,14 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*/alert* — следить за ценой\n"
         "*/myalerts* — активные уведомления\n"
         "*/stopalerts* — отключить все\n"
-        "*/cancel* — отменить действие\n\n"
-        "После поиска у каждого скина есть кнопки:\n"
-        "🛒 *Купить* — открыть листинг\n"
-        "🔔 *Следить* — создать алерт на этот скин",
+        "*/cancel* — отменить действие",
         parse_mode="Markdown"
     )
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text("❌ Отменено.\n\n/find — поиск")
+    return ConversationHandler.END
 
 # ── Поиск ────────────────────────────────────────────────────
 
@@ -159,8 +92,9 @@ async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = make_keyboard(POPULAR_TOURNAMENTS, columns=2)
     kb.inline_keyboard.append([InlineKeyboardButton("✏️ Ввести вручную", callback_data="__manual__")])
     await update.message.reply_text(
-        "🏆 *Шаг 1/6 — Турнир или наклейка*",
-        parse_mode="Markdown", reply_markup=kb
+        "🏆 *Шаг 1/7 — Турнир или наклейка*\n\nВыбери или введи вручную:",
+        parse_mode="Markdown",
+        reply_markup=kb
     )
     return STEP_TOURNAMENT
 
@@ -170,17 +104,17 @@ async def tournament_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if q.data == "__manual__":
         await q.edit_message_text("✏️ Введи название турнира или наклейки:")
         return STEP_TOURNAMENT
-    get_user_data(context)["tournament"] = q.data
+    context.user_data["tournament"] = q.data
     await q.edit_message_text(
-        f"✅ *{q.data}*\n\n🔫 *Шаг 2/6 — Оружие*",
+        f"✅ *{q.data}*\n\n🔫 *Шаг 2/7 — Оружие*",
         parse_mode="Markdown", reply_markup=make_keyboard(WEAPONS, columns=3)
     )
     return STEP_WEAPON
 
 async def tournament_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    get_user_data(context)["tournament"] = update.message.text.strip()
+    context.user_data["tournament"] = update.message.text.strip()
     await update.message.reply_text(
-        f"✅ *{update.message.text.strip()}*\n\n🔫 *Шаг 2/6 — Оружие*",
+        f"✅ *{update.message.text.strip()}*\n\n🔫 *Шаг 2/7 — Оружие*",
         parse_mode="Markdown", reply_markup=make_keyboard(WEAPONS, columns=3)
     )
     return STEP_WEAPON
@@ -188,9 +122,9 @@ async def tournament_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def weapon_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    get_user_data(context)["weapon"] = q.data
+    context.user_data["weapon"] = q.data
     await q.edit_message_text(
-        f"✅ *{q.data}*\n\n⭐ *Шаг 3/6 — Качество*",
+        f"✅ *{q.data}*\n\n⭐ *Шаг 3/7 — Качество*",
         parse_mode="Markdown", reply_markup=make_keyboard(QUALITIES, columns=2)
     )
     return STEP_QUALITY
@@ -198,9 +132,9 @@ async def weapon_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def quality_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    get_user_data(context)["quality"] = q.data
+    context.user_data["quality"] = q.data
     await q.edit_message_text(
-        f"✅ *{q.data}*\n\n📊 *Шаг 4/6 — Износ*",
+        f"✅ *{q.data}*\n\n📊 *Шаг 4/7 — Износ*",
         parse_mode="Markdown", reply_markup=make_keyboard(WEAR_OPTIONS, columns=2)
     )
     return STEP_WEAR
@@ -208,9 +142,9 @@ async def quality_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def wear_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    get_user_data(context)["wear"] = q.data
+    context.user_data["wear"] = q.data
     await q.edit_message_text(
-        f"✅ *{q.data}*\n\n🔑 *Шаг 5/6 — Брелок*",
+        f"✅ *{q.data}*\n\n🔑 *Шаг 5/7 — Брелок*",
         parse_mode="Markdown",
         reply_markup=make_keyboard(["Да — с брелком", "Нет — без брелка", "Любой"], columns=2)
     )
@@ -219,9 +153,9 @@ async def wear_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def charm_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    get_user_data(context)["charm"] = q.data
+    context.user_data["charm"] = q.data
     await q.edit_message_text(
-        f"✅ *{q.data}*\n\n💰 *Шаг 6/6 — Цена*",
+        f"✅ *{q.data}*\n\n💰 *Шаг 6/7 — Цена*",
         parse_mode="Markdown", reply_markup=make_keyboard(PRICE_RANGES, columns=3)
     )
     return STEP_PRICE
@@ -229,28 +163,25 @@ async def charm_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def price_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    data = get_user_data(context)
-    data["price"] = q.data
+    context.user_data["price"] = q.data
     await q.edit_message_text(
-        f"✅ *{q.data}*\n\n📅 *Шаг 7/7 — Год наклеек*\n\nПоказать скины только с наклейками до какого года?",
-        parse_mode="Markdown",
-        reply_markup=make_keyboard(STICKER_YEARS, columns=3)
+        f"✅ *{q.data}*\n\n📅 *Шаг 7/7 — Год наклеек*",
+        parse_mode="Markdown", reply_markup=make_keyboard(STICKER_YEARS, columns=3)
     )
     return STEP_YEAR
 
 async def year_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    data = get_user_data(context)
-    data["year"] = q.data
+    context.user_data["year"] = q.data
+    d = context.user_data
     await q.edit_message_text(
-        f"🔍 *Параметры поиска:*\n"
-        f"🏆 {data.get('tournament','?')} | 🔫 {data.get('weapon','?')}\n"
-        f"📊 {data.get('wear','?')} | 💰 {data.get('price','?')}\n"
-        f"📅 Год наклеек: {data.get('year','?')}\n\n⏳ Ищу...",
+        f"🔍 *Ищу:*\n"
+        f"🏆 {d.get('tournament','?')} | 🔫 {d.get('weapon','?')}\n"
+        f"📊 {d.get('wear','?')} | 💰 {d.get('price','?')} | 📅 {d.get('year','?')}\n\n⏳ Подожди...",
         parse_mode="Markdown"
     )
-    results = await do_search(data)
+    results = await do_search(d)
     await send_results(q.message.chat_id, results, context)
     return ConversationHandler.END
 
@@ -278,8 +209,7 @@ async def alert_price_received(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data["alert_price"] = price
         await update.message.reply_text(
             f"✅ Макс. цена: *${price:.2f}*\n\n⏱ Как часто проверять?",
-            parse_mode="Markdown",
-            reply_markup=make_keyboard(CHECK_INTERVALS, columns=3)
+            parse_mode="Markdown", reply_markup=make_keyboard(CHECK_INTERVALS, columns=3)
         )
         return ALERT_INTERVAL
     except ValueError:
@@ -291,7 +221,6 @@ async def alert_interval_received(update: Update, context: ContextTypes.DEFAULT_
     await q.answer()
     chat_id = str(q.message.chat_id)
     label = q.data
-
     alert = {
         "query": context.user_data["alert_query"],
         "target_price": context.user_data["alert_price"],
@@ -303,13 +232,11 @@ async def alert_interval_received(update: Update, context: ContextTypes.DEFAULT_
     }
     alerts_store.setdefault(chat_id, []).append(alert)
     save_alerts(alerts_store)
-
     await q.edit_message_text(
         f"✅ *Уведомление создано!*\n\n"
         f"🔍 {alert['query']}\n"
         f"💰 до ${alert['target_price']:.2f} | ⏱ каждые {label}\n\n"
-        f"Напишу как только найду подходящий скин 🔔\n\n"
-        f"*/myalerts* — все уведомления",
+        f"Напишу как только найду подходящий скин 🔔\n\n*/myalerts* — все уведомления",
         parse_mode="Markdown"
     )
     return ConversationHandler.END
@@ -338,6 +265,17 @@ async def delete_all_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_alerts(alerts_store)
     await q.edit_message_text("🗑 Удалено.\n\n*/alert* — создать новое", parse_mode="Markdown")
 
+async def watch_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    context.user_data.clear()
+    context.user_data["alert_query"] = q.data.replace("__watch__", "")
+    await q.message.reply_text(
+        f"🔔 Слежу за: *{context.user_data['alert_query']}*\n\n💰 Введи максимальную цену ($):",
+        parse_mode="Markdown"
+    )
+    return ALERT_PRICE
+
 # ── Фоновая проверка ─────────────────────────────────────────
 
 async def check_alerts_job(app):
@@ -353,17 +291,13 @@ async def check_alerts_job(app):
                 alert["last_check"] = now
                 save_alerts(alerts_store)
                 try:
-                    results = await do_search({"tournament": alert["query"], "weapon": "Любое", "wear": "Любой", "charm": "Любой", "price": "Любой"})
+                    results = await do_search({"tournament": alert["query"], "weapon": "Любое", "wear": "Любой", "charm": "Любой", "price": "Любой", "year": "Любой"})
                     matches = [r for r in results if r.get("price_raw", 999999) <= alert["target_price"]]
                     if matches:
-                        text = (
-                            f"🔔 *Найден скин по твоей цене!*\n\n"
-                            f"🔍 {alert['query']} | 💰 до ${alert['target_price']:.2f}\n"
-                            f"📦 Найдено: {len(matches)} шт.\n\n*Лучшие варианты:*\n"
-                        )
+                        text = f"🔔 *Найден скин!*\n\n🔍 {alert['query']} | 💰 до ${alert['target_price']:.2f}\n📦 {len(matches)} шт.\n\n"
                         buttons = []
                         for item in matches[:3]:
-                            text += f"\n{item['platform']} — *{item['price']}*"
+                            text += f"{item['platform']} — *{item['price']}*\n"
                             buttons.append([InlineKeyboardButton(f"🛒 {item['platform']} {item['price']}", url=item["link"])])
                         await app.bot.send_message(int(chat_id), text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(buttons))
                 except Exception as e:
@@ -377,6 +311,7 @@ async def do_search(filters_data):
     wear = filters_data.get("wear", "Любой")
     price_range = filters_data.get("price", "Любой")
     charm = filters_data.get("charm", "Любой")
+    year_filter = filters_data.get("year", "Любой")
 
     parts = []
     if weapon and weapon != "Любое":
@@ -388,6 +323,7 @@ async def do_search(filters_data):
     query = " ".join(parts)
 
     price_min, price_max = PRICE_MAP.get(price_range, (0, 999999)) if price_range != "Любой" else (0, 999999)
+    max_year = int(year_filter.replace("до ", "")) if year_filter != "Любой" else 9999
 
     async with aiohttp.ClientSession() as session:
         all_r = await asyncio.gather(
@@ -405,16 +341,10 @@ async def do_search(filters_data):
         results = [r for r in results if r.get("has_charm")]
     elif charm == "Нет — без брелка":
         results = [r for r in results if not r.get("has_charm")]
-
-    year_filter = filters_data.get("year", "Любой")
-    max_year = get_max_year_from_filter(year_filter)
-
-    results.sort(key=lambda x: x.get("price_raw", 0))
-
-    # Фильтр по году наклеек
     if max_year != 9999:
         results = [r for r in results if item_matches_year(r.get("name", ""), max_year)]
 
+    results.sort(key=lambda x: x.get("price_raw", 0))
     return results[:30]
 
 async def fetch_steam(session, query):
@@ -425,13 +355,11 @@ async def fetch_steam(session, query):
                 return []
             data = await resp.json()
             return [{
-                "platform": "🎮 Steam",
-                "name": i.get("name", ""),
+                "platform": "🎮 Steam", "name": i.get("name", ""),
                 "price": i.get("sell_price_text", "N/A"),
                 "price_raw": i.get("sell_price", 0) / 100,
                 "link": f"https://steamcommunity.com/market/listings/730/{i.get('hash_name','')}",
-                "quantity": i.get("sell_listings", "?"),
-                "has_charm": False,
+                "quantity": i.get("sell_listings", "?"), "has_charm": False,
             } for i in (data.get("results") or [])]
     except Exception as e:
         logger.error(f"Steam: {e}"); return []
@@ -447,15 +375,12 @@ async def fetch_csfloat(session, query):
             for i in (data.get("data") or []):
                 price_raw = i.get("price", 0) / 100
                 results.append({
-                    "platform": "🌊 CSFloat",
-                    "name": i.get("item", {}).get("market_hash_name", ""),
-                    "price": f"${price_raw:.2f}",
-                    "price_raw": price_raw,
+                    "platform": "🌊 CSFloat", "name": i.get("item", {}).get("market_hash_name", ""),
+                    "price": f"${price_raw:.2f}", "price_raw": price_raw,
                     "link": f"https://csfloat.com/item/{i.get('id','')}",
                     "wear": i.get("item", {}).get("wear_name", ""),
                     "float": f"{i.get('item',{}).get('float_value',0):.4f}",
-                    "quantity": 1,
-                    "has_charm": bool(i.get("item", {}).get("keychains")),
+                    "quantity": 1, "has_charm": bool(i.get("item", {}).get("keychains")),
                 })
             return results
     except Exception as e:
@@ -473,26 +398,21 @@ async def fetch_skinport(session, query):
                 if q in i.get("market_hash_name", "").lower():
                     p = i.get("min_price") or 0
                     results.append({
-                        "platform": "🏪 Skinport",
-                        "name": i.get("market_hash_name", ""),
-                        "price": f"${p:.2f}" if p else "N/A",
-                        "price_raw": p,
+                        "platform": "🏪 Skinport", "name": i.get("market_hash_name", ""),
+                        "price": f"${p:.2f}" if p else "N/A", "price_raw": p,
                         "link": f"https://skinport.com/market?search={i.get('market_hash_name','')}",
-                        "quantity": i.get("quantity", "?"),
-                        "has_charm": False,
+                        "quantity": i.get("quantity", "?"), "has_charm": False,
                     })
             return results[:10]
     except Exception as e:
         logger.error(f"Skinport: {e}"); return []
-
-# ── Отправка результатов ──────────────────────────────────────
 
 async def send_results(chat_id, results, context):
     if not results:
         await context.bot.send_message(chat_id, "😔 *Ничего не найдено*\n\n/find — новый поиск", parse_mode="Markdown")
         return
     await context.bot.send_message(chat_id, f"✅ *Найдено {len(results)} результатов:*", parse_mode="Markdown")
-    for item in results[:20]:
+    for item in results[:15]:
         charm_icon = "🔑 " if item.get("has_charm") else ""
         wear_line = f"\n📊 {item['wear']}" if item.get("wear") else ""
         float_line = f" | Float: `{item['float']}`" if item.get("float") else ""
@@ -509,21 +429,6 @@ async def send_results(chat_id, results, context):
         await asyncio.sleep(0.3)
     await context.bot.send_message(chat_id, "/find — новый поиск | /alert — уведомление", parse_mode="Markdown")
 
-async def watch_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    context.user_data["alert_query"] = q.data.replace("__watch__", "")
-    await q.message.reply_text(
-        f"🔔 Слежу за: *{context.user_data['alert_query']}*\n\n💰 Введи максимальную цену ($):",
-        parse_mode="Markdown"
-    )
-    return ALERT_PRICE
-
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text("❌ Отменено.\n\n/find — поиск")
-    return ConversationHandler.END
-
 # ── Main ─────────────────────────────────────────────────────
 
 async def post_init(app):
@@ -533,11 +438,12 @@ def main():
     app = Application.builder().token(TOKEN).post_init(post_init).build()
 
     search_conv = ConversationHandler(
-    entry_points=[CommandHandler("find", find_cmd)],
-    conversation_timeout=60,
-
+        entry_points=[CommandHandler("find", find_cmd)],
         states={
-            STEP_TOURNAMENT: [CallbackQueryHandler(tournament_chosen), MessageHandler(filters.TEXT & ~filters.COMMAND, tournament_text)],
+            STEP_TOURNAMENT: [
+                CallbackQueryHandler(tournament_chosen),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, tournament_text),
+            ],
             STEP_WEAPON: [CallbackQueryHandler(weapon_chosen)],
             STEP_QUALITY: [CallbackQueryHandler(quality_chosen)],
             STEP_WEAR: [CallbackQueryHandler(wear_chosen)],
@@ -546,6 +452,8 @@ def main():
             STEP_YEAR: [CallbackQueryHandler(year_chosen)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=120,
+        allow_reentry=True,
     )
 
     alert_conv = ConversationHandler(
@@ -559,18 +467,20 @@ def main():
             ALERT_INTERVAL: [CallbackQueryHandler(alert_interval_received)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=120,
+        allow_reentry=True,
     )
 
+    app.add_handler(search_conv)
+    app.add_handler(alert_conv)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("myalerts", my_alerts_cmd))
     app.add_handler(CommandHandler("stopalerts", stop_alerts_cmd))
     app.add_handler(CallbackQueryHandler(delete_all_cb, pattern="^__delete_all__$"))
-    app.add_handler(search_conv)
-    app.add_handler(alert_conv)
 
     print("🤖 Бот запущен!")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
