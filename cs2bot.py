@@ -11,7 +11,8 @@ from telegram.ext import (
 )
 
 # ============================================================
-TOKEN = "8831794929:AAEgNJahaqbw24Yz6br8ModHcM75SREvXac"
+# ВСТАВЬ СВОЙ ТОКЕН СЮДА
+TOKEN = "YOUR_BOT_TOKEN"
 ALERTS_FILE = "alerts.json"
 # ============================================================
 
@@ -73,6 +74,20 @@ INTERVAL_SECONDS = {
     "1 час": 3600, "3 часа": 10800,
 }
 
+# Турниры по годам для фильтрации наклеек
+TOURNAMENT_YEARS = {
+    "Katowice 2014": 2014, "Cologne 2014": 2014,
+    "Katowice 2015": 2015, "Cluj-Napoca 2015": 2015, "Cologne 2015": 2015,
+    "Columbus 2016": 2016, "Cologne 2016": 2016, "Cluj-Napoca 2016": 2016,
+    "Atlanta 2017": 2017, "Krakow 2017": 2017,
+    "Boston 2018": 2018, "London 2018": 2018,
+    "Katowice 2019": 2019, "Berlin 2019": 2019,
+    "Stockholm 2021": 2021,
+    "Antwerp 2022": 2022, "Rio 2022": 2022,
+    "Paris 2023": 2023,
+    "Katowice 2024": 2024, "Copenhagen 2024": 2024, "Shanghai 2024": 2024,
+}
+
 
 def load_alerts():
     if os.path.exists(ALERTS_FILE):
@@ -97,10 +112,40 @@ def make_keyboard(options, columns=2):
     return rows
 
 
-def item_matches_year(name, year_filter):
-    if year_filter == "Любой":
+def sticker_passes_year_filter(sticker_name, max_year):
+    """Проверяет что наклейка не новее max_year"""
+    if max_year == 9999:
         return True
-    return year_filter in name
+    sticker_lower = sticker_name.lower()
+    # Ищем год в названии наклейки
+    for year in range(2013, 2026):
+        if str(year) in sticker_lower:
+            return year <= max_year
+    # Если год не найден — пропускаем
+    return True
+
+
+def item_passes_sticker_filter(stickers, max_year):
+    """Все наклейки на скине должны быть не новее max_year"""
+    if max_year == 9999 or not stickers:
+        return True
+    for sticker in stickers:
+        name = sticker.get("name", "") or sticker.get("market_hash_name", "")
+        if not sticker_passes_year_filter(name, max_year):
+            return False
+    return True
+
+
+def format_stickers(stickers):
+    """Форматирует список наклеек для отображения"""
+    if not stickers:
+        return ""
+    names = []
+    for s in stickers:
+        name = s.get("name", "") or s.get("market_hash_name", "")
+        if name:
+            names.append(name)
+    return ", ".join(names) if names else ""
 
 
 # ── Команды ──────────────────────────────────────────────────
@@ -109,7 +154,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "CS2 Skin Finder\n\n"
         "Ищу скины с турнирными наклейками:\n"
-        "Steam, CSFloat, Skinport\n\n"
+        "- CSFloat (с точным фильтром по наклейкам)\n"
+        "- Steam (без фильтра по наклейкам)\n"
+        "- Skinport (без фильтра по наклейкам)\n\n"
         "/find - поиск с фильтрами\n"
         "/alert - уведомление о цене\n"
         "/myalerts - мои уведомления\n"
@@ -124,7 +171,9 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/alert - следить за ценой\n"
         "/myalerts - активные уведомления\n"
         "/stopalerts - отключить все\n"
-        "/cancel - отменить действие"
+        "/cancel - отменить действие\n\n"
+        "Фильтр по году наклеек работает точно только на CSFloat.\n"
+        "Steam и Skinport показываются без фильтра по наклейкам."
     )
 
 
@@ -140,7 +189,7 @@ async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     rows = make_keyboard(STICKER_YEARS, columns=4)
     await update.message.reply_text(
-        "Шаг 1/7 - Год турнира наклеек\n\nВыбери год или Любой:",
+        "Шаг 1/7 - Год наклеек\n\nВыбери максимальный год наклеек или Любой:",
         reply_markup=InlineKeyboardMarkup(rows)
     )
     return STEP_YEAR
@@ -212,7 +261,7 @@ async def price_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["price"] = q.data
     rows = make_keyboard(POPULAR_TOURNAMENTS, columns=2)
     await q.edit_message_text(
-        "Цена: " + q.data + "\n\nШаг 7/7 - Турнир (необязательно)\n\nМожно выбрать конкретный или Любой:",
+        "Цена: " + q.data + "\n\nШаг 7/7 - Турнир (необязательно)\n\nВыбери конкретный турнир или Любой:",
         reply_markup=InlineKeyboardMarkup(rows)
     )
     return STEP_TOURNAMENT
@@ -221,16 +270,13 @@ async def price_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def tournament_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-
     if q.data == "Ввести вручную":
         await q.edit_message_text("Введи название турнира или наклейки:")
         return STEP_TOURNAMENT
-
     if q.data == "Любой (все турниры)":
         context.user_data["tournament"] = ""
     else:
         context.user_data["tournament"] = q.data
-
     await start_search(q.message, context, edit=True)
     return ConversationHandler.END
 
@@ -246,12 +292,12 @@ async def start_search(message, context, edit=False):
     tournament_line = d.get("tournament", "") or "Любой"
     summary = (
         "Ищу:\n"
-        "Год: " + d.get("year", "Любой") + "\n"
+        "Год наклеек: до " + d.get("year", "Любой") + "\n"
         "Турнир: " + tournament_line + "\n"
         "Оружие: " + d.get("weapon", "Любое") + "\n"
         "Износ: " + d.get("wear", "Любой") + "\n"
         "Цена: " + d.get("price", "Любой") + "\n\n"
-        "Подожди..."
+        "Подожди, это может занять 10-20 секунд..."
     )
     if edit:
         await message.edit_text(summary)
@@ -411,48 +457,136 @@ async def do_search(filters_data):
     charm = filters_data.get("charm", "Любой")
     year_filter = filters_data.get("year", "Любой")
 
+    max_year = int(year_filter) if year_filter != "Любой" else 9999
+
+    # Строим поисковый запрос
     parts = []
     if weapon and weapon != "Любое":
         parts.append(weapon)
     if tournament:
         parts.append(tournament)
-    elif year_filter != "Любой":
-        parts.append(year_filter)
-    wear_name = WEAR_MAP.get(wear, "")
-    if wear_name:
-        parts.append(wear_name)
-    query = " ".join(parts) if parts else "sticker"
+    query = " ".join(parts) if parts else ""
 
     price_min, price_max = PRICE_MAP.get(price_range, (0, 999999)) if price_range != "Любой" else (0, 999999)
 
     async with aiohttp.ClientSession() as session:
         all_r = await asyncio.gather(
-            fetch_steam(session, query),
-            fetch_csfloat(session, query),
-            fetch_skinport(session, query),
+            fetch_csfloat_with_stickers(session, query, weapon, wear, price_min, price_max, max_year, charm),
+            fetch_steam(session, query, weapon, wear),
+            fetch_skinport(session, query, weapon),
             return_exceptions=True
         )
 
-    results = [item for r in all_r if isinstance(r, list) for item in r]
+    csfloat_results = all_r[0] if isinstance(all_r[0], list) else []
+    steam_results = all_r[1] if isinstance(all_r[1], list) else []
+    skinport_results = all_r[2] if isinstance(all_r[2], list) else []
 
+    # Применяем ценовой фильтр к Steam и Skinport
     if price_range != "Любой":
-        results = [r for r in results if price_min <= r.get("price_raw", 999999) <= price_max]
-    if charm == "Да - с брелком":
-        results = [r for r in results if r.get("has_charm")]
-    elif charm == "Нет - без брелка":
-        results = [r for r in results if not r.get("has_charm")]
-    if year_filter != "Любой":
-        results = [r for r in results if item_matches_year(r.get("name", ""), year_filter)]
+        steam_results = [r for r in steam_results if price_min <= r.get("price_raw", 999999) <= price_max]
+        skinport_results = [r for r in skinport_results if price_min <= r.get("price_raw", 999999) <= price_max]
 
+    # CSFloat уже отфильтрован по наклейкам
+    # Steam и Skinport — без фильтра по наклейкам, помечаем
+    for r in steam_results:
+        r["note"] = "наклейки не проверены"
+    for r in skinport_results:
+        r["note"] = "наклейки не проверены"
+
+    results = csfloat_results + steam_results + skinport_results
     results.sort(key=lambda x: x.get("price_raw", 0))
     return results[:30]
 
 
-async def fetch_steam(session, query):
+async def fetch_csfloat_with_stickers(session, query, weapon, wear, price_min, price_max, max_year, charm):
+    """CSFloat с фильтрацией по наклейкам"""
     try:
+        results = []
+        page = 0
+        found = 0
+
+        # Ищем пока не найдём 10 подходящих или не просмотрим 5 страниц
+        while found < 10 and page < 5:
+            params = "?limit=20&sort_by=lowest_price&page=" + str(page)
+            if weapon and weapon != "Любое":
+                params += "&category=0"
+
+            # Строим запрос
+            search_query = query if query else weapon if weapon != "Любое" else "AK-47"
+            url = "https://csfloat.com/api/v1/listings" + params + "&market_hash_name=" + aiohttp.helpers.quote(search_query)
+
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    break
+                data = await resp.json()
+                items = data.get("data") or []
+                if not items:
+                    break
+
+                for i in items:
+                    item_data = i.get("item", {})
+                    price_raw = i.get("price", 0) / 100
+
+                    # Ценовой фильтр
+                    if price_raw < price_min or price_raw > price_max:
+                        continue
+
+                    # Фильтр по износу
+                    if wear and wear != "Любой":
+                        wear_name = WEAR_MAP.get(wear, "")
+                        item_wear = item_data.get("wear_name", "")
+                        if wear_name and item_wear != wear_name:
+                            continue
+
+                    # Фильтр по брелку
+                    has_charm = bool(item_data.get("keychains"))
+                    if charm == "Да - с брелком" and not has_charm:
+                        continue
+                    if charm == "Нет - без брелка" and has_charm:
+                        continue
+
+                    # Получаем наклейки
+                    stickers = item_data.get("stickers") or []
+
+                    # Фильтр по году наклеек
+                    if max_year != 9999:
+                        if not stickers:
+                            continue  # Без наклеек — пропускаем
+                        if not item_passes_sticker_filter(stickers, max_year):
+                            continue
+
+                    sticker_text = format_stickers(stickers)
+                    results.append({
+                        "platform": "CSFloat",
+                        "name": item_data.get("market_hash_name", ""),
+                        "price": "$" + str(round(price_raw, 2)),
+                        "price_raw": price_raw,
+                        "link": "https://csfloat.com/item/" + str(i.get("id", "")),
+                        "wear": item_data.get("wear_name", ""),
+                        "float": str(round(item_data.get("float_value", 0), 4)),
+                        "quantity": 1,
+                        "has_charm": has_charm,
+                        "stickers": sticker_text,
+                    })
+                    found += 1
+                    if found >= 10:
+                        break
+
+                page += 1
+                await asyncio.sleep(0.5)  # Не спамим запросами
+
+        return results
+    except Exception as e:
+        logger.error("CSFloat stickers: " + str(e))
+        return []
+
+
+async def fetch_steam(session, query, weapon):
+    try:
+        search = query if query else (weapon if weapon != "Любое" else "AK-47 Sticker")
         url = (
             "https://steamcommunity.com/market/search/render/"
-            "?query=" + aiohttp.helpers.quote(query) +
+            "?query=" + aiohttp.helpers.quote(search) +
             "&appid=730&norender=1&count=10"
         )
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
@@ -467,43 +601,14 @@ async def fetch_steam(session, query):
                 "link": "https://steamcommunity.com/market/listings/730/" + i.get("hash_name", ""),
                 "quantity": i.get("sell_listings", "?"),
                 "has_charm": False,
+                "stickers": "",
             } for i in (data.get("results") or [])]
     except Exception as e:
         logger.error("Steam: " + str(e))
         return []
 
 
-async def fetch_csfloat(session, query):
-    try:
-        url = (
-            "https://csfloat.com/api/v1/listings"
-            "?limit=10&sort_by=lowest_price&market_hash_name=" + aiohttp.helpers.quote(query)
-        )
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-            if resp.status != 200:
-                return []
-            data = await resp.json()
-            results = []
-            for i in (data.get("data") or []):
-                price_raw = i.get("price", 0) / 100
-                results.append({
-                    "platform": "CSFloat",
-                    "name": i.get("item", {}).get("market_hash_name", ""),
-                    "price": "$" + str(round(price_raw, 2)),
-                    "price_raw": price_raw,
-                    "link": "https://csfloat.com/item/" + str(i.get("id", "")),
-                    "wear": i.get("item", {}).get("wear_name", ""),
-                    "float": str(round(i.get("item", {}).get("float_value", 0), 4)),
-                    "quantity": 1,
-                    "has_charm": bool(i.get("item", {}).get("keychains")),
-                })
-            return results
-    except Exception as e:
-        logger.error("CSFloat: " + str(e))
-        return []
-
-
-async def fetch_skinport(session, query):
+async def fetch_skinport(session, query, weapon):
     try:
         async with session.get(
             "https://api.skinport.com/v1/items?app_id=730&currency=USD",
@@ -512,10 +617,12 @@ async def fetch_skinport(session, query):
             if resp.status != 200:
                 return []
             data = await resp.json()
-            q = query.lower()
+            search = (query if query else weapon if weapon != "Любое" else "").lower()
+            if not search:
+                return []
             results = []
             for i in data:
-                if q in i.get("market_hash_name", "").lower():
+                if search in i.get("market_hash_name", "").lower():
                     p = i.get("min_price") or 0
                     results.append({
                         "platform": "Skinport",
@@ -525,6 +632,7 @@ async def fetch_skinport(session, query):
                         "link": "https://skinport.com/market?search=" + i.get("market_hash_name", ""),
                         "quantity": i.get("quantity", "?"),
                         "has_charm": False,
+                        "stickers": "",
                     })
             return results[:10]
     except Exception as e:
@@ -536,21 +644,32 @@ async def send_results(chat_id, results, context):
     if not results:
         await context.bot.send_message(
             chat_id,
-            "Ничего не найдено.\n\n/find - новый поиск"
+            "Ничего не найдено.\n\nПопробуй изменить фильтры или выбрать другой год.\n\n/find - новый поиск"
         )
         return
+
+    csfloat = [r for r in results if r["platform"] == "CSFloat"]
+    other = [r for r in results if r["platform"] != "CSFloat"]
+
     await context.bot.send_message(
         chat_id,
-        "Найдено " + str(len(results)) + " результатов:"
+        "Найдено " + str(len(results)) + " результатов:\n"
+        "CSFloat (с фильтром наклеек): " + str(len(csfloat)) + "\n"
+        "Steam + Skinport (без фильтра): " + str(len(other))
     )
+
     for item in results[:15]:
         wear_line = "\nИзнос: " + item["wear"] if item.get("wear") else ""
         float_line = " | Float: " + item.get("float", "") if item.get("float") else ""
         charm_line = " [брелок]" if item.get("has_charm") else ""
+        sticker_line = "\nНаклейки: " + item["stickers"] if item.get("stickers") else ""
+        note_line = "\n! " + item["note"] if item.get("note") else ""
+
         text = (
             item["platform"] + charm_line + "\n" +
             item["name"] + wear_line + float_line + "\n" +
-            "Цена: " + item["price"] + " | " + str(item.get("quantity", "?")) + " шт."
+            "Цена: " + item["price"] + " | " + str(item.get("quantity", "?")) + " шт." +
+            sticker_line + note_line
         )
         rows = [[
             InlineKeyboardButton("Купить", url=item["link"]),
@@ -561,6 +680,7 @@ async def send_results(chat_id, results, context):
             reply_markup=InlineKeyboardMarkup(rows)
         )
         await asyncio.sleep(0.3)
+
     await context.bot.send_message(
         chat_id,
         "/find - новый поиск | /alert - уведомление"
