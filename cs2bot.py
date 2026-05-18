@@ -471,7 +471,7 @@ async def do_search(filters_data):
     async with aiohttp.ClientSession() as session:
         all_r = await asyncio.gather(
             fetch_csfloat_with_stickers(session, query, weapon, wear, price_min, price_max, max_year, charm),
-            fetch_steam(session, query, weapon, wear),
+           fetch_steam(session, query, weapon),
             fetch_skinport(session, query, weapon),
             return_exceptions=True
         )
