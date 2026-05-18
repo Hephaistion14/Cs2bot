@@ -10,7 +10,7 @@ from telegram.ext import (
     MessageHandler, filters, ContextTypes, ConversationHandler
 )
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "8831794929:AAEgNJahaqbw24Yz6br8ModHcM75SREvXac"
 ALERTS_FILE = "alerts.json"
 
 logging.basicConfig(level=logging.INFO)
