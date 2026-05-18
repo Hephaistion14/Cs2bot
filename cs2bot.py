@@ -11,7 +11,8 @@ from telegram.ext import (
 )
 
 # ============================================================
-TOKEN = "8831794929:AAEgNJahaqbw24Yz6br8ModHcM75SREvXac"
+# ВСТАВЬ СВОЙ ТОКЕН СЮДА
+TOKEN = "YOUR_BOT_TOKEN"
 ALERTS_FILE = "alerts.json"
 # ============================================================
 
