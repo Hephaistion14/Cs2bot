@@ -89,21 +89,19 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def find_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
-    kb = make_keyboard(POPULAR_TOURNAMENTS, columns=2)
-    kb.inline_keyboard.append([InlineKeyboardButton("✏️ Ввести вручную", callback_data="__manual__")])
+    keyboard = []
+    for i in range(0, len(POPULAR_TOURNAMENTS), 2):
+        row = [InlineKeyboardButton(POPULAR_TOURNAMENTS[i], callback_data=POPULAR_TOURNAMENTS[i])]
+        if i+1 < len(POPULAR_TOURNAMENTS):
+            row.append(InlineKeyboardButton(POPULAR_TOURNAMENTS[i+1], callback_data=POPULAR_TOURNAMENTS[i+1]))
+        keyboard.append(row)
+    keyboard.append([InlineKeyboardButton("✏️ Ввести вручную", callback_data="__manual__")])
     await update.message.reply_text(
-        "🏆 *Шаг 1/7 — Турнир или наклейка*\n\nВыбери или введи вручную:",
-        parse_mode="Markdown",
-        reply_markup=kb
+        "🏆 Шаг 1/7 — Турнир или наклейка\n\nВыбери или введи вручную:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return STEP_TOURNAMENT
 
-async def tournament_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    if q.data == "__manual__":
-        await q.edit_message_text("✏️ Введи название турнира или наклейки:")
-        return STEP_TOURNAMENT
     context.user_data["tournament"] = q.data
     await q.edit_message_text(
         f"✅ *{q.data}*\n\n🔫 *Шаг 2/7 — Оружие*",
