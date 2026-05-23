@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 # ============================================================
-TOKEN = "8831794929:AAHd6RDLRy6VfWSbV_36ZBcnpsKJkOPSUD8"
+TOKEN = "8831794929:AAEgNJahaqbw24Yz6br8Mod-HcM75SREvXac"
 ALERTS_FILE = "alerts.json"
 # ============================================================
 
@@ -29,6 +29,11 @@ STEP_TOURNAMENT = 6
 ALERT_QUERY = 10
 ALERT_PRICE = 11
 ALERT_INTERVAL = 12
+
+TRACK_QUERY = 20
+TRACK_PERCENT = 21
+
+TRACKS_FILE = "tracks.json"
 
 WEAPONS = [
     "Любое", "AK-47", "M4A4", "M4A1-S", "AWP", "Desert Eagle",
@@ -103,6 +108,21 @@ def save_alerts(data):
 alerts_store = load_alerts()
 
 
+def load_tracks():
+    if os.path.exists(TRACKS_FILE):
+        with open(TRACKS_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_tracks(data):
+    with open(TRACKS_FILE, "w") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+tracks_store = load_tracks()
+
+
 def make_keyboard(options, columns=2):
     buttons = [InlineKeyboardButton(opt, callback_data=opt) for opt in options]
     rows = []
@@ -154,11 +174,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "CS2 Skin Finder\n\n"
         "Ищу скины с турнирными наклейками:\n"
         "- CSFloat (с точным фильтром по наклейкам)\n"
-        "- Steam (без фильтра по наклейкам)\n"
-        "- Skinport (без фильтра по наклейкам)\n\n"
+        "- Steam, Skinport\n\n"
         "/find - поиск с фильтрами\n"
         "/alert - уведомление о цене\n"
+        "/track - следить за ценой на cs.money, lisskins, cs.market\n"
         "/myalerts - мои уведомления\n"
+        "/mytracks - мои отслеживания\n"
         "/help - справка"
     )
 
@@ -471,7 +492,7 @@ async def do_search(filters_data):
     async with aiohttp.ClientSession() as session:
         all_r = await asyncio.gather(
             fetch_csfloat_with_stickers(session, query, weapon, wear, price_min, price_max, max_year, charm),
-           fetch_steam(session, query, weapon),
+            fetch_steam(session, query, weapon, wear),
             fetch_skinport(session, query, weapon),
             return_exceptions=True
         )
@@ -688,8 +709,267 @@ async def send_results(chat_id, results, context):
 
 # ── Main ─────────────────────────────────────────────────────
 
+# ── Track команды ────────────────────────────────────────────
+
+async def track_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text(
+        "Отслеживание цены на cs.money, lisskins, cs.market\n\n"
+        "Введи точное название скина (как на Steam):\n"
+        "Например: AK-47 | Redline (Field-Tested)"
+    )
+    return TRACK_QUERY
+
+
+async def track_query_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["track_query"] = update.message.text.strip()
+    await update.message.reply_text(
+        "Скин: " + context.user_data["track_query"] + "\n\n"
+        "На сколько процентов ниже текущей минимальной цены уведомить?\n"
+        "Введи число, например: 5"
+    )
+    return TRACK_PERCENT
+
+
+async def track_percent_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        percent = float(update.message.text.strip().replace("%", ""))
+        if percent <= 0 or percent > 50:
+            await update.message.reply_text("Введи число от 1 до 50")
+            return TRACK_PERCENT
+
+        chat_id = str(update.effective_chat.id)
+        item_name = context.user_data["track_query"]
+
+        await update.message.reply_text(
+            "Ищу текущую цену на " + item_name + "...\nПодожди несколько секунд."
+        )
+
+        prices = await fetch_all_track_prices(item_name)
+
+        if not prices:
+            await update.message.reply_text(
+                "Не удалось найти цену на этот предмет.\n"
+                "Проверь название и попробуй снова.\n\n/track - попробовать снова"
+            )
+            return ConversationHandler.END
+
+        min_price = min(p["price"] for p in prices)
+        threshold = round(min_price * (1 - percent / 100), 2)
+
+        track = {
+            "query": item_name,
+            "percent": percent,
+            "base_price": min_price,
+            "threshold": threshold,
+            "last_check": datetime.now().timestamp(),
+            "active": True,
+            "created": datetime.now().strftime("%d.%m.%Y %H:%M"),
+        }
+
+        tracks_store.setdefault(chat_id, []).append(track)
+        save_tracks(tracks_store)
+
+        prices_text = ""
+        for p in prices:
+            prices_text += "\n" + p["platform"] + ": $" + str(round(p["price"], 2))
+
+        await update.message.reply_text(
+            "Отслеживание создано!\n\n"
+            "Скин: " + item_name + "\n"
+            "Текущий минимум: $" + str(round(min_price, 2)) + "\n"
+            "Уведомлю если появится дешевле: $" + str(threshold) + " (-" + str(percent) + "%)\n\n"
+            "Текущие цены:" + prices_text + "\n\n"
+            "/mytracks - все отслеживания\n"
+            "/stoptracks - отключить все"
+        )
+        return ConversationHandler.END
+
+    except ValueError:
+        await update.message.reply_text("Введи число, например: 5")
+        return TRACK_PERCENT
+
+
+async def my_tracks_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = str(update.effective_chat.id)
+    active = [t for t in tracks_store.get(chat_id, []) if t.get("active")]
+    if not active:
+        await update.message.reply_text("Нет активных отслеживаний.\n\n/track - создать")
+        return
+    text = "Отслеживания (" + str(len(active)) + "):\n\n"
+    for i, t in enumerate(active, 1):
+        text += str(i) + ". " + t["query"] + "\n"
+        text += "   Порог: $" + str(round(t["threshold"], 2)) + " (-" + str(t["percent"]) + "%)\n\n"
+    rows = [[InlineKeyboardButton("Удалить все", callback_data="__delete_tracks__")]]
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(rows))
+
+
+async def stop_tracks_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tracks_store[str(update.effective_chat.id)] = []
+    save_tracks(tracks_store)
+    await update.message.reply_text("Все отслеживания отключены.")
+
+
+async def delete_tracks_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+    tracks_store[str(q.message.chat_id)] = []
+    save_tracks(tracks_store)
+    await q.edit_message_text("Удалено.\n\n/track - создать новое")
+
+
+# ── Парсинг cs.money, lisskins, cs.market ────────────────────
+
+async def fetch_csmoney(session, item_name):
+    try:
+        url = "https://cs.money/api/sell/offers?limit=20&offset=0&appId=730&name=" + aiohttp.helpers.quote(item_name)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+            "Referer": "https://cs.money/",
+        }
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json()
+            items = data.get("items") or []
+            results = []
+            for item in items[:5]:
+                price = item.get("pricing", {}).get("computed") or item.get("pricing", {}).get("default")
+                if price:
+                    results.append({
+                        "platform": "cs.money",
+                        "price": float(price),
+                        "link": "https://cs.money/market/sell-skins/?name=" + aiohttp.helpers.quote(item_name),
+                    })
+            return results
+    except Exception as e:
+        logger.error("cs.money: " + str(e))
+        return []
+
+
+async def fetch_lisskins(session, item_name):
+    try:
+        url = "https://lisskins.com/api/market/search?query=" + aiohttp.helpers.quote(item_name) + "&game=csgo&limit=20"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+        }
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json()
+            items = data.get("data") or data.get("items") or []
+            results = []
+            for item in items[:5]:
+                price = item.get("price") or item.get("cost")
+                if price:
+                    results.append({
+                        "platform": "lisskins",
+                        "price": float(price),
+                        "link": "https://lisskins.com/market/csgo?search=" + aiohttp.helpers.quote(item_name),
+                    })
+            return results
+    except Exception as e:
+        logger.error("lisskins: " + str(e))
+        return []
+
+
+async def fetch_csmarket(session, item_name):
+    try:
+        url = "https://market.csgo.com/api/v2/search-item-by-hash-name?key=&hash_name=" + aiohttp.helpers.quote(item_name)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+        }
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                return []
+            data = await resp.json()
+            items = data.get("data") or []
+            results = []
+            for item in items[:5]:
+                price = item.get("price")
+                if price:
+                    results.append({
+                        "platform": "cs.market",
+                        "price": float(price) / 100,
+                        "link": "https://market.csgo.com/" + aiohttp.helpers.quote(item_name),
+                    })
+            return results
+    except Exception as e:
+        logger.error("cs.market: " + str(e))
+        return []
+
+
+async def fetch_all_track_prices(item_name):
+    async with aiohttp.ClientSession() as session:
+        all_r = await asyncio.gather(
+            fetch_csmoney(session, item_name),
+            fetch_lisskins(session, item_name),
+            fetch_csmarket(session, item_name),
+            return_exceptions=True
+        )
+    results = []
+    for r in all_r:
+        if isinstance(r, list):
+            results.extend(r)
+    results.sort(key=lambda x: x["price"])
+    return results
+
+
+# ── Фоновая проверка треков ───────────────────────────────────
+
+async def check_tracks_job(app):
+    while True:
+        await asyncio.sleep(120)
+        now = datetime.now().timestamp()
+        for chat_id, user_tracks in list(tracks_store.items()):
+            for track in user_tracks:
+                if not track.get("active"):
+                    continue
+                if now - track.get("last_check", 0) < 300:
+                    continue
+                track["last_check"] = now
+                save_tracks(tracks_store)
+                try:
+                    prices = await fetch_all_track_prices(track["query"])
+                    if not prices:
+                        continue
+                    min_price = min(p["price"] for p in prices)
+                    threshold = track["threshold"]
+
+                    if min_price <= threshold:
+                        best = [p for p in prices if p["price"] <= threshold]
+                        text = (
+                            "Найдена низкая цена!\n\n"
+                            "Скин: " + track["query"] + "\n"
+                            "Порог: $" + str(round(threshold, 2)) + " (-" + str(track["percent"]) + "%)\n"
+                            "Найдена цена: $" + str(round(min_price, 2)) + "\n\n"
+                            "Площадки:\n"
+                        )
+                        buttons = []
+                        for p in best[:3]:
+                            text += p["platform"] + ": $" + str(round(p["price"], 2)) + "\n"
+                            buttons.append([InlineKeyboardButton(
+                                "Купить на " + p["platform"] + " $" + str(round(p["price"], 2)),
+                                url=p["link"]
+                            )])
+                        await app.bot.send_message(
+                            int(chat_id), text,
+                            reply_markup=InlineKeyboardMarkup(buttons)
+                        )
+                        # Обновляем базовую цену
+                        track["base_price"] = min_price
+                        track["threshold"] = round(min_price * (1 - track["percent"] / 100), 2)
+                        save_tracks(tracks_store)
+                except Exception as e:
+                    logger.error("Track check error " + chat_id + ": " + str(e))
+
+
 async def post_init(app):
     asyncio.create_task(check_alerts_job(app))
+    asyncio.create_task(check_tracks_job(app))
 
 
 def main():
@@ -729,13 +1009,28 @@ def main():
         allow_reentry=True,
     )
 
+    track_conv = ConversationHandler(
+        entry_points=[CommandHandler("track", track_cmd)],
+        states={
+            TRACK_QUERY: [MessageHandler(filters.TEXT & ~filters.COMMAND, track_query_received)],
+            TRACK_PERCENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, track_percent_received)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=120,
+        allow_reentry=True,
+    )
+
     app.add_handler(search_conv)
     app.add_handler(alert_conv)
+    app.add_handler(track_conv)
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("myalerts", my_alerts_cmd))
     app.add_handler(CommandHandler("stopalerts", stop_alerts_cmd))
+    app.add_handler(CommandHandler("mytracks", my_tracks_cmd))
+    app.add_handler(CommandHandler("stoptracks", stop_tracks_cmd))
     app.add_handler(CallbackQueryHandler(delete_all_cb, pattern="^__delete_all__$"))
+    app.add_handler(CallbackQueryHandler(delete_tracks_cb, pattern="^__delete_tracks__$"))
 
     print("Bot started!")
     app.run_polling(drop_pending_updates=True)
