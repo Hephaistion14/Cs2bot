@@ -11,7 +11,7 @@ from telegram.ext import (
 )
 
 # ============================================================
-TOKEN = "8831794929:AAEgNJahaqbw24Yz6br8ModHcM75SREvXac"
+TOKEN = "8831794929:AAHd6RDLRy6VfWSbV_36ZBcnpsKJkOPSUD8"
 ALERTS_FILE = "alerts.json"
 # ============================================================
 
